@@ -178,16 +178,19 @@ class VideoTranscriptAPITester:
             self.log("❌ No video ID available for streaming test")
             return False
 
-        # For streaming, we just check if the endpoint responds
+        # For streaming, we use GET request with range header to test partial content
         url = f"{self.api_url}/videos/{self.video_id}/stream"
         
         try:
-            response = requests.head(url, timeout=10)
+            # Test with a simple GET request first
+            response = requests.get(url, timeout=10, stream=True)
             success = response.status_code in [200, 206]  # 206 for partial content
             
             if success:
                 self.tests_passed += 1
                 self.log(f"✅ Video Streaming - Status: {response.status_code}")
+                # Close the stream
+                response.close()
             else:
                 self.log(f"❌ Video Streaming - Status: {response.status_code}")
                 
