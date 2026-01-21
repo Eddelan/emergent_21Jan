@@ -287,12 +287,12 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
     if not file.filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
         raise HTTPException(status_code=400, detail="Invalid file type. Only video files are allowed.")
     
-    # Check file size (25MB limit for Whisper)
+    # Check file size (500MB limit)
     content = await file.read()
     file_size = len(content)
     
-    if file_size > 25 * 1024 * 1024:  # 25MB
-        raise HTTPException(status_code=400, detail="File too large. Maximum size is 25MB.")
+    if file_size > 500 * 1024 * 1024:  # 500MB
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 500MB.")
     
     # Generate unique filename
     video_id = str(uuid.uuid4())

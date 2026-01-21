@@ -47,9 +47,9 @@ export default function HomePage() {
       return;
     }
 
-    // Check file size (25MB limit)
-    if (file.size > 25 * 1024 * 1024) {
-      toast.error("File too large. Maximum size is 25MB.");
+    // Check file size (500MB limit)
+    if (file.size > 500 * 1024 * 1024) {
+      toast.error("File too large. Maximum size is 500MB.");
       return;
     }
 
@@ -160,7 +160,7 @@ export default function HomePage() {
                     or click to browse
                   </p>
                   <p className="text-zinc-600 text-xs font-mono">
-                    MP4, MOV, AVI, WEBM • Max 25MB
+                    MP4, MOV, AVI, WEBM • Max 500MB
                   </p>
                 </>
               )}
