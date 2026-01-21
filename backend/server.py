@@ -134,11 +134,17 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
                 timestamp_granularities=["word", "segment"]
             )
         
+        logger.info(f"Whisper response type: {type(response)}")
+        logger.info(f"Has words attr: {hasattr(response, 'words')}")
+        
         segments = []
         
-        # Get all words with timestamps
+        # Get all words with timestamps if available
         all_words = []
+        has_word_timestamps = False
+        
         if hasattr(response, 'words') and response.words:
+            has_word_timestamps = True
             for idx, w in enumerate(response.words):
                 if isinstance(w, dict):
                     all_words.append(TranscriptWord(
@@ -155,9 +161,9 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
                         word=getattr(w, 'word', '').strip()
                     ))
         
-        # Process segments and associate words
+        # Process segments
         if hasattr(response, 'segments') and response.segments:
-            word_idx = 0
+            global_word_id = 0
             for idx, seg in enumerate(response.segments):
                 if isinstance(seg, dict):
                     start = seg.get('start', 0.0)
@@ -168,11 +174,30 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
                     end = getattr(seg, 'end', 0.0)
                     text = getattr(seg, 'text', '').strip()
                 
-                # Find words belonging to this segment
                 segment_words = []
-                for w in all_words:
-                    if w.start >= start and w.end <= end + 0.1:  # Small tolerance
-                        segment_words.append(w)
+                
+                if has_word_timestamps:
+                    # Use actual word timestamps
+                    for w in all_words:
+                        if w.start >= start - 0.1 and w.end <= end + 0.1:
+                            segment_words.append(w)
+                else:
+                    # Generate estimated word timestamps from segment
+                    words_in_text = text.split()
+                    if words_in_text:
+                        duration = end - start
+                        word_duration = duration / len(words_in_text)
+                        
+                        for i, word_text in enumerate(words_in_text):
+                            word_start = start + (i * word_duration)
+                            word_end = word_start + word_duration
+                            segment_words.append(TranscriptWord(
+                                id=global_word_id,
+                                start=round(word_start, 3),
+                                end=round(word_end, 3),
+                                word=word_text
+                            ))
+                            global_word_id += 1
                 
                 segments.append(TranscriptSegment(
                     id=idx,
@@ -182,19 +207,31 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
                     words=segment_words if segment_words else None
                 ))
         else:
-            # Fallback: create single segment with all words
+            # Fallback: create single segment
             text = ""
             if hasattr(response, 'text'):
                 text = response.text
             elif isinstance(response, dict) and 'text' in response:
                 text = response['text']
             
+            # Generate words from text
+            words_in_text = text.split() if text else []
+            estimated_duration = 0.3  # Assume 0.3s per word
+            segment_words = []
+            for i, word_text in enumerate(words_in_text):
+                segment_words.append(TranscriptWord(
+                    id=i,
+                    start=round(i * estimated_duration, 3),
+                    end=round((i + 1) * estimated_duration, 3),
+                    word=word_text
+                ))
+            
             segments.append(TranscriptSegment(
                 id=0,
                 start=0.0,
-                end=all_words[-1].end if all_words else 0.0,
+                end=len(words_in_text) * estimated_duration,
                 text=text,
-                words=all_words if all_words else None
+                words=segment_words if segment_words else None
             ))
         
         return segments
