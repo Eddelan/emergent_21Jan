@@ -46,11 +46,19 @@ logger = logging.getLogger(__name__)
 
 
 # Models
+class TranscriptWord(BaseModel):
+    id: int
+    start: float
+    end: float
+    word: str
+
+
 class TranscriptSegment(BaseModel):
     id: int
     start: float
     end: float
     text: str
+    words: Optional[List[TranscriptWord]] = None
 
 
 class Video(BaseModel):
@@ -114,7 +122,7 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
 
 
 async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
-    """Transcribe audio using OpenAI Whisper"""
+    """Transcribe audio using OpenAI Whisper with word-level timestamps"""
     try:
         stt = OpenAISpeechToText(api_key=os.getenv("EMERGENT_LLM_KEY"))
         
@@ -123,13 +131,34 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
                 file=audio_file,
                 model="whisper-1",
                 response_format="verbose_json",
-                timestamp_granularities=["segment"]
+                timestamp_granularities=["word", "segment"]
             )
         
         segments = []
+        
+        # Get all words with timestamps
+        all_words = []
+        if hasattr(response, 'words') and response.words:
+            for idx, w in enumerate(response.words):
+                if isinstance(w, dict):
+                    all_words.append(TranscriptWord(
+                        id=idx,
+                        start=w.get('start', 0.0),
+                        end=w.get('end', 0.0),
+                        word=w.get('word', '').strip()
+                    ))
+                else:
+                    all_words.append(TranscriptWord(
+                        id=idx,
+                        start=getattr(w, 'start', 0.0),
+                        end=getattr(w, 'end', 0.0),
+                        word=getattr(w, 'word', '').strip()
+                    ))
+        
+        # Process segments and associate words
         if hasattr(response, 'segments') and response.segments:
+            word_idx = 0
             for idx, seg in enumerate(response.segments):
-                # Handle both dict and object formats
                 if isinstance(seg, dict):
                     start = seg.get('start', 0.0)
                     end = seg.get('end', 0.0)
@@ -139,14 +168,21 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
                     end = getattr(seg, 'end', 0.0)
                     text = getattr(seg, 'text', '').strip()
                 
+                # Find words belonging to this segment
+                segment_words = []
+                for w in all_words:
+                    if w.start >= start and w.end <= end + 0.1:  # Small tolerance
+                        segment_words.append(w)
+                
                 segments.append(TranscriptSegment(
                     id=idx,
                     start=start,
                     end=end,
-                    text=text
+                    text=text,
+                    words=segment_words if segment_words else None
                 ))
         else:
-            # Fallback if no segments
+            # Fallback: create single segment with all words
             text = ""
             if hasattr(response, 'text'):
                 text = response.text
@@ -156,8 +192,9 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
             segments.append(TranscriptSegment(
                 id=0,
                 start=0.0,
-                end=0.0,
-                text=text
+                end=all_words[-1].end if all_words else 0.0,
+                text=text,
+                words=all_words if all_words else None
             ))
         
         return segments
