@@ -1,34 +1,101 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
-}
+/* App-specific styles */
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
-}
-
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
+/* Video player container */
+.video-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+    background: #000;
 }
 
-.App-link {
-    color: #61dafb;
+.video-container video {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
+/* Upload zone animations */
+.upload-zone {
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.upload-zone:hover {
+    border-color: hsl(var(--primary) / 0.5);
+    background-color: hsl(var(--primary) / 0.05);
+}
+
+.upload-zone.active {
+    border-color: hsl(var(--primary));
+    background-color: hsl(var(--primary) / 0.1);
+}
+
+/* Transcript segment styles */
+.transcript-segment {
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.transcript-segment:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.transcript-segment.selected {
+    background-color: rgba(45, 212, 191, 0.1);
+    border-left: 2px solid #2dd4bf;
+}
+
+/* Progress bar animations */
+.progress-bar {
+    transition: width 0.3s ease;
+}
+
+/* Button glow effect */
+.btn-glow {
+    box-shadow: 0 0 15px rgba(124, 58, 237, 0.3);
+    transition: box-shadow 0.2s ease, transform 0.1s ease;
+}
+
+.btn-glow:hover {
+    box-shadow: 0 0 25px rgba(124, 58, 237, 0.5);
+}
+
+.btn-glow:active {
+    transform: scale(0.98);
+}
+
+/* Hero glow effect */
+.hero-glow {
+    background: radial-gradient(circle at center, rgba(124, 58, 237, 0.15) 0%, rgba(9, 9, 11, 0) 70%);
+}
+
+/* Loading spinner */
+@keyframes spin {
     to {
         transform: rotate(360deg);
     }
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+/* Fade animations for page transitions */
+.fade-enter {
+    opacity: 0;
+}
+
+.fade-enter-active {
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.fade-exit {
+    opacity: 1;
+}
+
+.fade-exit-active {
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }

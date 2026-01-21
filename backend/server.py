@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,10 +7,13 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
-
+import aiofiles
+import subprocess
+import asyncio
+from emergentintegrations.llm.openai import OpenAISpeechToText
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -19,52 +23,420 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
+# Create upload directories
+UPLOAD_DIR = ROOT_DIR / "uploads"
+CLIPS_DIR = ROOT_DIR / "clips"
+AUDIO_DIR = ROOT_DIR / "audio"
+UPLOAD_DIR.mkdir(exist_ok=True)
+CLIPS_DIR.mkdir(exist_ok=True)
+AUDIO_DIR.mkdir(exist_ok=True)
+
+# Create the main app
 app = FastAPI()
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
+
+# Models
+class TranscriptSegment(BaseModel):
+    id: int
+    start: float
+    end: float
+    text: str
+
+
+class Video(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    filename: str
+    original_filename: str
+    file_path: str
+    file_size: int
+    duration: Optional[float] = None
+    status: str = "uploading"  # uploading, processing, transcribing, ready, error
+    transcript: Optional[List[TranscriptSegment]] = None
+    error_message: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
+class ClipRequest(BaseModel):
+    segments: List[dict]  # List of {start: float, end: float}
+
+
+class Clip(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    video_id: str
+    filename: str
+    file_path: str
+    segments: List[dict]
+    status: str = "processing"  # processing, ready, error
+    error_message: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def get_video_duration(file_path: str) -> float:
+    """Get video duration using ffprobe"""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', file_path],
+            capture_output=True, text=True
+        )
+        return float(result.stdout.strip())
+    except Exception as e:
+        logger.error(f"Error getting duration: {e}")
+        return 0.0
+
+
+def extract_audio(video_path: str, audio_path: str) -> bool:
+    """Extract audio from video using ffmpeg"""
+    try:
+        subprocess.run(
+            ['ffmpeg', '-i', video_path, '-vn', '-acodec', 'libmp3lame',
+             '-q:a', '2', '-y', audio_path],
+            capture_output=True, check=True
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error extracting audio: {e}")
+        return False
+
+
+async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
+    """Transcribe audio using OpenAI Whisper"""
+    try:
+        stt = OpenAISpeechToText(api_key=os.getenv("EMERGENT_LLM_KEY"))
+        
+        with open(audio_path, "rb") as audio_file:
+            response = await stt.transcribe(
+                file=audio_file,
+                model="whisper-1",
+                response_format="verbose_json",
+                timestamp_granularities=["segment"]
+            )
+        
+        segments = []
+        if hasattr(response, 'segments') and response.segments:
+            for idx, seg in enumerate(response.segments):
+                segments.append(TranscriptSegment(
+                    id=idx,
+                    start=seg.start,
+                    end=seg.end,
+                    text=seg.text.strip()
+                ))
+        else:
+            # Fallback if no segments
+            segments.append(TranscriptSegment(
+                id=0,
+                start=0.0,
+                end=0.0,
+                text=response.text if hasattr(response, 'text') else ""
+            ))
+        
+        return segments
+    except Exception as e:
+        logger.error(f"Transcription error: {e}")
+        raise
+
+
+async def process_video(video_id: str):
+    """Background task to process video"""
+    try:
+        # Get video from DB
+        video_doc = await db.videos.find_one({"id": video_id}, {"_id": 0})
+        if not video_doc:
+            return
+        
+        # Update status to processing
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "processing"}}
+        )
+        
+        # Get duration
+        duration = get_video_duration(video_doc['file_path'])
+        
+        # Extract audio
+        audio_path = str(AUDIO_DIR / f"{video_id}.mp3")
+        if not extract_audio(video_doc['file_path'], audio_path):
+            await db.videos.update_one(
+                {"id": video_id},
+                {"$set": {"status": "error", "error_message": "Failed to extract audio"}}
+            )
+            return
+        
+        # Update status to transcribing
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "transcribing", "duration": duration}}
+        )
+        
+        # Transcribe
+        segments = await transcribe_audio(audio_path)
+        
+        # Convert segments to dict
+        segments_dict = [s.model_dump() for s in segments]
+        
+        # Update with transcript
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {
+                "status": "ready",
+                "transcript": segments_dict,
+                "duration": duration
+            }}
+        )
+        
+        # Clean up audio file
+        try:
+            os.remove(audio_path)
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error processing video {video_id}: {e}")
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "error", "error_message": str(e)}}
+        )
+
+
+def create_video_clip(input_path: str, output_path: str, segments: List[dict]) -> bool:
+    """Create a video clip from selected segments using ffmpeg"""
+    try:
+        if not segments:
+            return False
+        
+        # Sort segments by start time
+        sorted_segments = sorted(segments, key=lambda x: x['start'])
+        
+        # Create filter complex for concatenation
+        filter_parts = []
+        concat_parts = []
+        
+        for i, seg in enumerate(sorted_segments):
+            start = seg['start']
+            end = seg['end']
+            duration = end - start
+            
+            filter_parts.append(
+                f"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[v{i}];"
+                f"[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[a{i}]"
+            )
+            concat_parts.append(f"[v{i}][a{i}]")
+        
+        filter_complex = ";".join(filter_parts) + ";" + "".join(concat_parts) + f"concat=n={len(sorted_segments)}:v=1:a=1[outv][outa]"
+        
+        cmd = [
+            'ffmpeg', '-i', input_path,
+            '-filter_complex', filter_complex,
+            '-map', '[outv]', '-map', '[outa]',
+            '-c:v', 'libx264', '-c:a', 'aac',
+            '-y', output_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
+            return False
+            
+        return True
+    except Exception as e:
+        logger.error(f"Error creating clip: {e}")
+        return False
+
+
+# Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Video Transcript Clip Generator API"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
+@api_router.post("/videos/upload")
+async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Upload a video file"""
+    # Validate file type
+    if not file.filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
+        raise HTTPException(status_code=400, detail="Invalid file type. Only video files are allowed.")
     
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
+    # Check file size (25MB limit for Whisper)
+    content = await file.read()
+    file_size = len(content)
     
-    return status_checks
+    if file_size > 25 * 1024 * 1024:  # 25MB
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 25MB.")
+    
+    # Generate unique filename
+    video_id = str(uuid.uuid4())
+    ext = Path(file.filename).suffix
+    filename = f"{video_id}{ext}"
+    file_path = str(UPLOAD_DIR / filename)
+    
+    # Save file
+    async with aiofiles.open(file_path, 'wb') as f:
+        await f.write(content)
+    
+    # Create video record
+    video = Video(
+        id=video_id,
+        filename=filename,
+        original_filename=file.filename,
+        file_path=file_path,
+        file_size=file_size,
+        status="uploading"
+    )
+    
+    # Convert to dict for MongoDB
+    video_dict = video.model_dump()
+    video_dict['created_at'] = video_dict['created_at'].isoformat()
+    
+    await db.videos.insert_one(video_dict)
+    
+    # Start background processing
+    background_tasks.add_task(process_video, video_id)
+    
+    return {"id": video_id, "status": "uploading", "message": "Video uploaded, processing started"}
+
+
+@api_router.get("/videos/{video_id}")
+async def get_video(video_id: str):
+    """Get video details and transcript"""
+    video = await db.videos.find_one({"id": video_id}, {"_id": 0})
+    
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    return video
+
+
+@api_router.get("/videos/{video_id}/stream")
+async def stream_video(video_id: str):
+    """Stream video file"""
+    video = await db.videos.find_one({"id": video_id}, {"_id": 0})
+    
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    if not os.path.exists(video['file_path']):
+        raise HTTPException(status_code=404, detail="Video file not found")
+    
+    return FileResponse(
+        video['file_path'],
+        media_type="video/mp4",
+        filename=video['original_filename']
+    )
+
+
+@api_router.post("/videos/{video_id}/generate-clip")
+async def generate_clip(video_id: str, request: ClipRequest, background_tasks: BackgroundTasks):
+    """Generate a clip from selected transcript segments"""
+    video = await db.videos.find_one({"id": video_id}, {"_id": 0})
+    
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    if video['status'] != 'ready':
+        raise HTTPException(status_code=400, detail="Video is not ready for clipping")
+    
+    if not request.segments:
+        raise HTTPException(status_code=400, detail="No segments selected")
+    
+    # Validate segments
+    for seg in request.segments:
+        if 'start' not in seg or 'end' not in seg:
+            raise HTTPException(status_code=400, detail="Invalid segment format")
+        if seg['start'] >= seg['end']:
+            raise HTTPException(status_code=400, detail="Invalid segment: start must be less than end")
+    
+    # Create clip record
+    clip_id = str(uuid.uuid4())
+    clip_filename = f"{clip_id}.mp4"
+    clip_path = str(CLIPS_DIR / clip_filename)
+    
+    clip = Clip(
+        id=clip_id,
+        video_id=video_id,
+        filename=clip_filename,
+        file_path=clip_path,
+        segments=request.segments,
+        status="processing"
+    )
+    
+    clip_dict = clip.model_dump()
+    clip_dict['created_at'] = clip_dict['created_at'].isoformat()
+    
+    await db.clips.insert_one(clip_dict)
+    
+    # Process clip in background
+    async def process_clip():
+        try:
+            success = create_video_clip(video['file_path'], clip_path, request.segments)
+            
+            if success:
+                await db.clips.update_one(
+                    {"id": clip_id},
+                    {"$set": {"status": "ready"}}
+                )
+            else:
+                await db.clips.update_one(
+                    {"id": clip_id},
+                    {"$set": {"status": "error", "error_message": "Failed to create clip"}}
+                )
+        except Exception as e:
+            await db.clips.update_one(
+                {"id": clip_id},
+                {"$set": {"status": "error", "error_message": str(e)}}
+            )
+    
+    background_tasks.add_task(process_clip)
+    
+    return {"id": clip_id, "status": "processing", "message": "Clip generation started"}
+
+
+@api_router.get("/clips/{clip_id}")
+async def get_clip(clip_id: str):
+    """Get clip details"""
+    clip = await db.clips.find_one({"id": clip_id}, {"_id": 0})
+    
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    
+    return clip
+
+
+@api_router.get("/clips/{clip_id}/download")
+async def download_clip(clip_id: str):
+    """Download clip file"""
+    clip = await db.clips.find_one({"id": clip_id}, {"_id": 0})
+    
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    
+    if clip['status'] != 'ready':
+        raise HTTPException(status_code=400, detail="Clip is not ready")
+    
+    if not os.path.exists(clip['file_path']):
+        raise HTTPException(status_code=404, detail="Clip file not found")
+    
+    return FileResponse(
+        clip['file_path'],
+        media_type="video/mp4",
+        filename=f"clip_{clip_id}.mp4",
+        headers={"Content-Disposition": f"attachment; filename=clip_{clip_id}.mp4"}
+    )
+
 
 # Include the router in the main app
 app.include_router(api_router)
@@ -77,12 +449,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
