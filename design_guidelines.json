@@ -1,0 +1,157 @@
+{
+  "identity": {
+    "persona": "E1 - The Anti-AI Designer",
+    "mission": "Create a cinematic, high-precision video tool that feels like a pro studio, not a generic SaaS.",
+    "principles": [
+      "Fusion: Mix 'Cyberpunk' aesthetics with 'Swiss' precision.",
+      "Emotion: Dark mode isn't just black; it's 'Void' and 'Neon'.",
+      "Content: The transcript is the hero. Treat text like code.",
+      "Contrast: High-vis accents against deep matte backgrounds."
+    ]
+  },
+  "typography": {
+    "fonts": {
+      "headings": {
+        "family": "Outfit, sans-serif",
+        "weights": ["600", "700"],
+        "usage": "Hero titles, Section headers, Modal titles"
+      },
+      "body": {
+        "family": "DM Sans, sans-serif",
+        "weights": ["400", "500"],
+        "usage": "General text, Transcript content, UI labels"
+      },
+      "mono": {
+        "family": "JetBrains Mono, monospace",
+        "weights": ["400"],
+        "usage": "Timestamps, Code snippets, Data values"
+      }
+    },
+    "rules": [
+      "Headings must use tight tracking (-0.02em).",
+      "Transcript text must be legible (16px-18px) with relaxed line-height (1.6).",
+      "Use uppercase + wide spacing for labels (e.g., 'DURATION', 'SIZE')."
+    ]
+  },
+  "colors": {
+    "theme": "Cinematic Dark (Archetype 7 Hybrid)",
+    "palette": {
+      "background": {
+        "default": "#09090b",
+        "surface": "#18181b",
+        "overlay": "#27272a"
+      },
+      "primary": {
+        "main": "#7c3aed",
+        "hover": "#6d28d9",
+        "foreground": "#ffffff"
+      },
+      "secondary": {
+        "main": "#2dd4bf",
+        "foreground": "#000000"
+      },
+      "text": {
+        "primary": "#fafafa",
+        "secondary": "#a1a1aa",
+        "muted": "#52525b"
+      },
+      "status": {
+        "success": "#10b981",
+        "error": "#ef4444",
+        "warning": "#f59e0b"
+      }
+    },
+    "gradients": {
+      "hero_glow": "radial-gradient(circle at center, rgba(124, 58, 237, 0.15) 0%, rgba(9, 9, 11, 0) 70%)",
+      "selection": "linear-gradient(90deg, rgba(45, 212, 191, 0.1) 0%, rgba(45, 212, 191, 0.05) 100%)"
+    }
+  },
+  "layout": {
+    "grid_system": {
+      "dashboard": "grid-cols-1 md:grid-cols-12 gap-6",
+      "editor": "grid-cols-1 lg:grid-cols-12 gap-0 h-screen overflow-hidden"
+    },
+    "spacing": {
+      "container_padding": "p-6 md:p-12",
+      "section_gap": "gap-8",
+      "component_gap": "gap-4"
+    },
+    "radius": {
+      "default": "rounded-lg",
+      "button": "rounded-md",
+      "panel": "rounded-xl"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-primary text-white hover:bg-primary/90 shadow-[0_0_15px_rgba(124,58,237,0.3)] transition-all duration-300",
+      "secondary": "bg-secondary/10 text-secondary hover:bg-secondary/20 border border-secondary/20",
+      "ghost": "hover:bg-white/5 text-zinc-400 hover:text-white"
+    },
+    "cards": {
+      "style": "bg-zinc-900/50 border border-white/5 backdrop-blur-sm hover:border-white/10 transition-colors",
+      "glass": "bg-black/40 backdrop-blur-xl border border-white/10"
+    },
+    "transcript_viewer": {
+      "container": "h-full overflow-y-auto p-6 bg-zinc-950/50 border-l border-white/5 font-body",
+      "segment": "cursor-pointer p-1 rounded hover:bg-white/5 transition-colors",
+      "selected": "bg-teal-500/10 text-teal-200 border-l-2 border-teal-500 pl-2",
+      "timestamp": "font-mono text-xs text-zinc-500 mr-4 select-none"
+    },
+    "upload_zone": {
+      "style": "border-2 border-dashed border-zinc-800 hover:border-primary/50 hover:bg-primary/5 transition-all rounded-2xl p-12 flex flex-col items-center justify-center text-center cursor-pointer group",
+      "active": "border-primary bg-primary/10"
+    }
+  },
+  "pages": {
+    "home": {
+      "layout": "flex flex-col min-h-screen bg-background relative overflow-hidden",
+      "hero": {
+        "title": "Turn Talk into Content.",
+        "subtitle": "Upload video. Select text. Generate clips. It's that simple.",
+        "image_bg": "https://images.unsplash.com/photo-1727142073871-d40f5a7c76d8?crop=entropy&cs=srgb&fm=jpg&q=85"
+      }
+    },
+    "editor": {
+      "layout": "h-screen flex flex-col lg:flex-row overflow-hidden",
+      "left_panel": "w-full lg:w-2/3 bg-black flex items-center justify-center relative p-4",
+      "right_panel": "w-full lg:w-1/3 border-l border-white/5 bg-zinc-900/30 flex flex-col"
+    }
+  },
+  "assets": {
+    "images": {
+      "hero_bg": "https://images.unsplash.com/photo-1727142073871-d40f5a7c76d8?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "studio_vibe": "https://images.unsplash.com/photo-1705107958696-a7f73c749ab3?crop=entropy&cs=srgb&fm=jpg&q=85"
+    },
+    "icons": "Use lucide-react for all UI icons (Upload, Play, Scissors, Download, ChevronRight)"
+  },
+  "instructions_to_main_agent": [
+    "1. Install fonts: Add '@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;500;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;700&display=swap');' to index.css",
+    "2. Configure Tailwind: Update tailwind.config.js with the 'Cinematic Dark' colors and fonts.",
+    "3. Build the 'TranscriptViewer' component carefully. It needs to handle selection logic (start_time, end_time) based on user clicks.",
+    "4. Use 'sonner' for all notifications (Upload success, Error, Generation complete).",
+    "5. Ensure the Video Player in the editor is responsive and maintains aspect ratio.",
+    "6. The 'Generate' button should be prominent and use the 'primary' button style with a glow effect."
+  ],
+  "universal_guidelines": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy",
+    "Use glass-morphism effects with backdrop filters (12-24px blur)",
+    "You MUST NOT apply universal transition. Eg: 'transition: all'. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms",
+    "You MUST NOT center align the app container, ie do not add '.App { text-align: center; }' in the css file. This disrupts the human natural reading flow of text",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯📚🎭🎬🎪🎉🎊🎁🎀🎂🍰🎈🎨🎰💰💵💳🏦💎🪙💸🤑📊📈📉💹🔢🏆🥇 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories (especially sponsor logos) = main agent will use placeholder text which is FORBIDDEN",
+    "Prioritize using pre-existing components from src/components/ui when applicable",
+    "Create new components that match the style and conventions of existing components when needed",
+    "Examine existing components to understand the project's component patterns before creating new ones",
+    "Components MUST use named exports (export const ComponentName = ...)",
+    "Pages MUST use default exports (export default function PageName() {...})",
+    "Use 'sonner' for toasts. Sonner component are located in '/app/src/components/ui/sonner.tsx'"
+  ]
+}
