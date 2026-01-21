@@ -305,12 +305,19 @@ class VideoTranscriptAPITester:
         url = f"{self.api_url}/clips/{self.clip_id}/download"
         
         try:
-            response = requests.head(url, timeout=10)
+            # Use GET request with stream=True to test download without downloading full file
+            response = requests.get(url, timeout=10, stream=True)
             success = response.status_code == 200
             
             if success:
                 self.tests_passed += 1
                 self.log(f"✅ Clip Download - Status: {response.status_code}")
+                # Check if it's actually a video file
+                content_type = response.headers.get('content-type', '')
+                if 'video' in content_type:
+                    self.log(f"   Content-Type: {content_type}")
+                # Close the stream without downloading
+                response.close()
             else:
                 self.log(f"❌ Clip Download - Status: {response.status_code}")
                 
