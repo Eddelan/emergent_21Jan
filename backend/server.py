@@ -129,19 +129,35 @@ async def transcribe_audio(audio_path: str) -> List[TranscriptSegment]:
         segments = []
         if hasattr(response, 'segments') and response.segments:
             for idx, seg in enumerate(response.segments):
+                # Handle both dict and object formats
+                if isinstance(seg, dict):
+                    start = seg.get('start', 0.0)
+                    end = seg.get('end', 0.0)
+                    text = seg.get('text', '').strip()
+                else:
+                    start = getattr(seg, 'start', 0.0)
+                    end = getattr(seg, 'end', 0.0)
+                    text = getattr(seg, 'text', '').strip()
+                
                 segments.append(TranscriptSegment(
                     id=idx,
-                    start=seg.start,
-                    end=seg.end,
-                    text=seg.text.strip()
+                    start=start,
+                    end=end,
+                    text=text
                 ))
         else:
             # Fallback if no segments
+            text = ""
+            if hasattr(response, 'text'):
+                text = response.text
+            elif isinstance(response, dict) and 'text' in response:
+                text = response['text']
+            
             segments.append(TranscriptSegment(
                 id=0,
                 start=0.0,
                 end=0.0,
-                text=response.text if hasattr(response, 'text') else ""
+                text=text
             ))
         
         return segments
