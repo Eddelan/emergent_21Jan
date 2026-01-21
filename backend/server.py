@@ -1,5 +1,5 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Request, Header
+from fastapi.responses import FileResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -338,20 +338,75 @@ async def get_video(video_id: str):
 
 
 @api_router.get("/videos/{video_id}/stream")
-async def stream_video(video_id: str):
-    """Stream video file"""
+async def stream_video(video_id: str, range: str = Header(None)):
+    """Stream video file with range request support"""
     video = await db.videos.find_one({"id": video_id}, {"_id": 0})
     
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     
-    if not os.path.exists(video['file_path']):
+    file_path = video['file_path']
+    if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Video file not found")
     
+    file_size = os.path.getsize(file_path)
+    
+    # Determine media type based on file extension
+    ext = Path(file_path).suffix.lower()
+    media_types = {
+        '.mp4': 'video/mp4',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+        '.webm': 'video/webm'
+    }
+    media_type = media_types.get(ext, 'video/mp4')
+    
+    # Handle range request for video seeking
+    if range:
+        range_match = range.replace("bytes=", "").split("-")
+        start = int(range_match[0]) if range_match[0] else 0
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        
+        if start >= file_size:
+            raise HTTPException(status_code=416, detail="Range not satisfiable")
+        
+        end = min(end, file_size - 1)
+        content_length = end - start + 1
+        
+        def iter_file():
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                chunk_size = 1024 * 1024  # 1MB chunks
+                while remaining > 0:
+                    read_size = min(chunk_size, remaining)
+                    data = f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+            "Content-Type": media_type,
+        }
+        
+        return StreamingResponse(
+            iter_file(),
+            status_code=206,
+            headers=headers,
+            media_type=media_type
+        )
+    
+    # Full file response
     return FileResponse(
-        video['file_path'],
-        media_type="video/mp4",
-        filename=video['original_filename']
+        file_path,
+        media_type=media_type,
+        filename=video['original_filename'],
+        headers={"Accept-Ranges": "bytes"}
     )
 
 
